@@ -126,17 +126,29 @@ No longer populated on PCB
  */
 
 #define USE_SX1262
+// For LORA, spi 0
+#define PIN_SPI_MISO (0 + 23)
+#define PIN_SPI_MOSI (0 + 22)
+#define PIN_SPI_SCK (0 + 19)
+//#define PIN_SPI_MISO (32 + 13)
+//#define PIN_SPI_MOSI (32 + 12)
+//#define PIN_SPI_SCK (32 + 14)
 // #define USE_SX1268
 #define SX126X_CS (0 + 24) // FIXME - we really should define LORA_CS instead
 #define LORA_CS (0 + 24)
-#define SX126X_DIO1 (0 + 20)
+//#define SX126X_DIO1 (0 + 20)
+//#define SX126X_CS (32 + 15) // FIXME - we really should define LORA_CS instead
+//#define LORA_CS (32 + 15)
+#define SX126X_DIO1 (0 + 30)
 // Note DIO2 is attached internally to the module to an analog switch for TX/RX switching
 // #define SX1262_DIO3 (0 + 21)
 // This is used as an *output* from the sx1262 and connected internally to power the tcxo, do not drive from the
 //    main
 // CPU?
-#define SX126X_BUSY (0 + 17)
-#define SX126X_RESET (0 + 25)
+//#define SX126X_BUSY (0 + 17)
+//#define SX126X_RESET (0 + 25)
+#define SX126X_BUSY (0 + 29)
+#define SX126X_RESET (0 + 31)
 // Not really an E22 but TTGO seems to be trying to clone that
 #define SX126X_DIO2_AS_RF_SWITCH
 #define SX126X_DIO3_TCXO_VOLTAGE 1.8
@@ -179,10 +191,7 @@ No longer populated on PCB
  */
 #define SPI_INTERFACES_COUNT 2
 
-// For LORA, spi 0
-#define PIN_SPI_MISO (0 + 23)
-#define PIN_SPI_MOSI (0 + 22)
-#define PIN_SPI_SCK (0 + 19)
+
 
 // #define PIN_PWR_EN (0 + 6)
 

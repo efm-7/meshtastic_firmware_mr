@@ -170,11 +170,11 @@ void initRegion()
 #ifdef REGULATORY_LORA_REGIONCODE
     for (; r->code != meshtastic_Config_LoRaConfig_RegionCode_UNSET && r->code != REGULATORY_LORA_REGIONCODE; r++)
         ;
-    LOG_INFO("Wanted region %d, regulatory override to %s", config.lora.region, r->name);
+    LOG_INFO("^^^^ [RadioInterface] Wanted region %d, regulatory override to %s", config.lora.region, r->name);
 #else
     for (; r->code != meshtastic_Config_LoRaConfig_RegionCode_UNSET && r->code != config.lora.region; r++)
         ;
-    LOG_INFO("Wanted region %d, using %s", config.lora.region, r->name);
+    LOG_INFO("^^^^ [RadioInterface] Wanted region %d, using %s", config.lora.region, r->name);
 #endif
     myRegion = r;
 }
@@ -271,11 +271,11 @@ uint32_t RadioInterface::getTxDelayMsecWeighted(float snr)
     if (config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER ||
         config.device.role == meshtastic_Config_DeviceConfig_Role_REPEATER) {
         delay = random(0, 2 * CWsize) * slotTimeMsec;
-        LOG_DEBUG("rx_snr found in packet. Router: setting tx delay:%d", delay);
+        LOG_DEBUG("^^^^ [RadioInterface] rx_snr found in packet. Router: setting tx delay:%d", delay);
     } else {
         // offset the maximum delay for routers: (2 * CWmax * slotTimeMsec)
         delay = (2 * CWmax * slotTimeMsec) + random(0, pow(2, CWsize)) * slotTimeMsec;
-        LOG_DEBUG("rx_snr found in packet. Setting tx delay:%d", delay);
+        LOG_DEBUG("^^^^ [RadioInterface] rx_snr found in packet. Setting tx delay:%d", delay);
     }
 
     return delay;
@@ -329,7 +329,7 @@ void printPacket(const char *prefix, const meshtastic_MeshPacket *p)
         out += DEBUG_PORT.mt_sprintf(" priority=%d", p->priority);
 
     out += ")";
-    LOG_DEBUG("%s", out.c_str());
+    //LOG_DEBUG("%s", out.c_str());
 #endif
 }
 
@@ -346,7 +346,7 @@ bool RadioInterface::reconfigure()
 
 bool RadioInterface::init()
 {
-    LOG_INFO("Start meshradio init");
+    LOG_INFO("^^^^ [RadioInterface] - Start meshradio init");
 
     configChangedObserver.observe(&service->configChanged);
     preflightSleepObserver.observe(&preflightSleep);
@@ -494,7 +494,7 @@ void RadioInterface::applyModemConfig()
         }
 
         if ((myRegion->freqEnd - myRegion->freqStart) < bw / 1000) {
-            static const char *err_string = "Regional frequency range is smaller than bandwidth. Fall back to default preset";
+            static const char *err_string = "^^^^  [RadioInterface] Regional frequency range is smaller than bandwidth. Fall back to default preset";
             LOG_ERROR(err_string);
             RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_INVALID_RADIO_SETTING);
 
@@ -555,15 +555,15 @@ void RadioInterface::applyModemConfig()
     preambleTimeMsec = getPacketTime((uint32_t)0);
     maxPacketTimeMsec = getPacketTime(meshtastic_Constants_DATA_PAYLOAD_LEN + sizeof(PacketHeader));
 
-    LOG_INFO("Radio freq=%.3f, config.lora.frequency_offset=%.3f", freq, loraConfig.frequency_offset);
-    LOG_INFO("Set radio: region=%s, name=%s, config=%u, ch=%d, power=%d", myRegion->name, channelName, loraConfig.modem_preset,
+    LOG_INFO("^^^^ [RadioInterface] Radio freq=%.3f, config.lora.frequency_offset=%.3f", freq, loraConfig.frequency_offset);
+    LOG_INFO("^^^^ [RadioInterface]  Set radio: region=%s, name=%s, config=%u, ch=%d, power=%d", myRegion->name, channelName, loraConfig.modem_preset,
              channel_num, power);
-    LOG_INFO("myRegion->freqStart -> myRegion->freqEnd: %f -> %f (%f MHz)", myRegion->freqStart, myRegion->freqEnd,
+    LOG_INFO("^^^^ [RadioInterface] myRegion->freqStart -> myRegion->freqEnd: %f -> %f (%f MHz)", myRegion->freqStart, myRegion->freqEnd,
              myRegion->freqEnd - myRegion->freqStart);
-    LOG_INFO("numChannels: %d x %.3fkHz", numChannels, bw);
-    LOG_INFO("channel_num: %d", channel_num + 1);
-    LOG_INFO("frequency: %f", getFreq());
-    LOG_INFO("Slot time: %u msec", slotTimeMsec);
+    LOG_INFO("^^^^ [RadioInterface] numChannels: %d x %.3fkHz", numChannels, bw);
+    LOG_INFO("^^^^ [RadioInterface] channel_num: %d", channel_num + 1);
+    LOG_INFO("^^^^ [RadioInterface] frequency: %f", getFreq());
+    LOG_INFO("^^^^ [RadioInterface] Slot time: %u msec", slotTimeMsec);
 }
 
 /**
@@ -578,17 +578,20 @@ void RadioInterface::limitPower()
         maxPower = myRegion->powerLimit;
 
     if ((power > maxPower) && !devicestate.owner.is_licensed) {
-        LOG_INFO("Lower transmit power because of regulatory limits");
+        LOG_INFO("^^^^ [RadioInterface] Lower transmit power because of regulatory limits");
         power = maxPower;
     }
 
-    LOG_INFO("Set radio: final power level=%d", power);
+    LOG_INFO("^^^^ [RadioInterface] Set radio: final power level=%d", power);
 }
 
 void RadioInterface::deliverToReceiver(meshtastic_MeshPacket *p)
 {
-    if (router)
+    if (router){
         router->enqueueReceivedMessage(p);
+        LOG_INFO("^^^^ [RadioInterface] enqueueReceivedMessage()");
+    }
+    LOG_INFO("^^^^ [RadioInterface] deliverToReceiver()");
 }
 
 /***
@@ -598,7 +601,7 @@ size_t RadioInterface::beginSending(meshtastic_MeshPacket *p)
 {
     assert(!sendingPacket);
 
-    // LOG_DEBUG("Send queued packet on mesh (txGood=%d,rxGood=%d,rxBad=%d)", rf95.txGood(), rf95.rxGood(), rf95.rxBad());
+    // LOG_DEBUG("^^^^ Send queued packet on mesh (txGood=%d,rxGood=%d,rxBad=%d)", rf95.txGood(), rf95.rxGood(), rf95.rxBad());
     assert(p->which_payload_variant == meshtastic_MeshPacket_encrypted_tag); // It should have already been encoded by now
 
     radioBuffer.header.from = p->from;
@@ -608,7 +611,7 @@ size_t RadioInterface::beginSending(meshtastic_MeshPacket *p)
     radioBuffer.header.next_hop = 0;   // *** For future use ***
     radioBuffer.header.relay_node = 0; // *** For future use ***
     if (p->hop_limit > HOP_MAX) {
-        LOG_WARN("hop limit %d is too high, setting to %d", p->hop_limit, HOP_RELIABLE);
+        LOG_WARN("^^^^ [RadioInterface] hop limit %d is too high, setting to %d", p->hop_limit, HOP_RELIABLE);
         p->hop_limit = HOP_RELIABLE;
     }
     radioBuffer.header.flags =

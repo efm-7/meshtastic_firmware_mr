@@ -189,16 +189,16 @@ CryptoKey Channels::getKey(ChannelIndex chIndex)
         k.length = channelSettings.psk.size;
         if (k.length == 0) {
             if (ch.role == meshtastic_Channel_Role_SECONDARY) {
-                LOG_DEBUG("Unset PSK for secondary channel %s. use primary key", ch.settings.name);
+                //LOG_DEBUG("Unset PSK for secondary channel %s. use primary key", ch.settings.name);
                 k = getKey(primaryIndex);
             } else {
-                LOG_WARN("User disabled encryption");
+                //LOG_WARN("User disabled encryption");
             }
         } else if (k.length == 1) {
             // Convert the short single byte variants of psk into variant that can be used more generally
 
             uint8_t pskIndex = k.bytes[0];
-            LOG_DEBUG("Expand short PSK #%d", pskIndex);
+            //LOG_DEBUG("Expand short PSK #%d", pskIndex);
             if (pskIndex == 0)
                 k.length = 0; // Turn off encryption
             else {
@@ -211,12 +211,12 @@ CryptoKey Channels::getKey(ChannelIndex chIndex)
         } else if (k.length < 16) {
             // Error! The user specified only the first few bits of an AES128 key.  So by convention we just pad the rest of the
             // key with zeros
-            LOG_WARN("User provided a too short AES128 key - padding");
+            //LOG_WARN("User provided a too short AES128 key - padding");
             k.length = 16;
         } else if (k.length < 32 && k.length != 16) {
             // Error! The user specified only the first few bits of an AES256 key.  So by convention we just pad the rest of the
             // key with zeros
-            LOG_WARN("User provided a too short AES256 key - padding");
+            //LOG_WARN("User provided a too short AES256 key - padding");
             k.length = 32;
         }
     }
@@ -266,7 +266,7 @@ void Channels::onConfigChanged()
     }
 #if !MESHTASTIC_EXCLUDE_MQTT
     if (channels.anyMqttEnabled() && mqtt && !mqtt->isEnabled()) {
-        LOG_DEBUG("MQTT is enabled on at least one channel, so set MQTT thread to run immediately");
+        //LOG_DEBUG("MQTT is enabled on at least one channel, so set MQTT thread to run immediately");
         mqtt->start();
     }
 #endif
@@ -279,7 +279,7 @@ meshtastic_Channel &Channels::getByIndex(ChannelIndex chIndex)
         meshtastic_Channel *ch = channelFile.channels + chIndex;
         return *ch;
     } else {
-        LOG_ERROR("Invalid channel index %d > %d, malformed packet received?", chIndex, channelFile.channels_count);
+        //LOG_ERROR("Invalid channel index %d > %d, malformed packet received?", chIndex, channelFile.channels_count);
 
         static meshtastic_Channel *ch = (meshtastic_Channel *)malloc(sizeof(meshtastic_Channel));
         memset(ch, 0, sizeof(meshtastic_Channel));
@@ -387,7 +387,7 @@ bool Channels::decryptForHash(ChannelIndex chIndex, ChannelHash channelHash)
         // channelHash);
         return false;
     } else {
-        LOG_DEBUG("Use channel %d (hash 0x%x)", chIndex, channelHash);
+        //LOG_DEBUG("Use channel %d (hash 0x%x)", chIndex, channelHash);
         setCrypto(chIndex);
         return true;
     }

@@ -2,7 +2,7 @@
 #if !MESHTASTIC_EXCLUDE_GPS
 #include "GPS.h"
 #endif
-#include "MeshRadio.h"
+#include "MeshRadio.h"          //RADIO-Related
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "PowerFSM.h"
@@ -76,6 +76,8 @@ NRF52Bluetooth *nrf52Bluetooth = nullptr;
 #include "SX1262Interface.h"
 #include "SX1268Interface.h"
 #include "SX1280Interface.h"
+#include "E7MRInterface.h"                      //RADIO-Related
+#include "E7MRWrapper.h"  
 #include "detect/LoRaRadioType.h"
 
 #ifdef ARCH_STM32WL
@@ -112,7 +114,7 @@ AccelerometerThread *accelerometerThread = nullptr;
 AudioThread *audioThread = nullptr;
 #endif
 
-#if defined(TCXO_OPTIONAL)
+#if defined(TCXO_OPTIONAL)                  //RADIO-related
 float tcxoVoltage = SX126X_DIO3_TCXO_VOLTAGE; // if TCXO is optional, put this here so it can be changed further down.
 #endif
 
@@ -153,8 +155,8 @@ ScanI2C::FoundDevice rgb_found = ScanI2C::FoundDevice(ScanI2C::DeviceType::NONE,
 Adafruit_DRV2605 drv;
 #endif
 
-// Global LoRa radio type
-LoRaRadioType radioType = NO_RADIO;
+// Global LoRa radio type                       
+LoRaRadioType radioType = NO_RADIO;                 //RADIO-Related
 
 bool isVibrating = false;
 
@@ -171,6 +173,11 @@ std::pair<uint8_t, TwoWire *> nodeTelemetrySensorsMap[_meshtastic_TelemetrySenso
 #endif
 
 Router *router = NULL; // Users of router don't care what sort of subclass implements that API
+#if defined(USE_E7MR) 
+    //Router *router_1 = NULL; // Users of router don't care what sort of subclass implements that API
+    //Router *router_2 = NULL; // Users of router don't care what sort of subclass implements that API
+#endif
+
 
 const char *getDeviceName()
 {
@@ -212,7 +219,12 @@ static Periodic *ledPeriodic;
 static OSThread *powerFSMthread;
 static OSThread *ambientLightingThread;
 
-RadioInterface *rIf = NULL;
+//RadioInterface *rIf = NULL;
+E7MRWrapper *rIf = NULL;
+#if defined(USE_E7MR) 
+    //RadioInterface *rIf_1 = NULL;
+    //RadioInterface *rIf_2 = NULL;
+#endif
 
 /**
  * Some platforms (nrf52) might provide an alterate version that suppresses calling delay from sleep.
@@ -241,7 +253,7 @@ void setup()
 #if ARCH_PORTDUINO
     SPISettings spiSettings(settingsMap[spiSpeed], MSBFIRST, SPI_MODE0);
 #else
-    SPISettings spiSettings(4000000, MSBFIRST, SPI_MODE0);
+    SPISettings spiSettings(4000000, MSBFIRST, SPI_MODE0); //RADIO-Related
 #endif
 
     meshtastic_Config_DisplayConfig_OledType screen_model =
@@ -631,7 +643,7 @@ void setup()
     rp2040Setup();
 #endif
 
-    initSPI(); // needed here before reading from littleFS
+    initSPI(); // needed here before reading from littleFS  
 
     // We do this as early as possible because this loads preferences from flash
     // but we need to do this after main cpu init (esp32setup), because we need the random seed set
@@ -640,11 +652,21 @@ void setup()
     // If we're taking on the repeater role, use flood router and turn off 3V3_S rail because peripherals are not needed
     if (config.device.role == meshtastic_Config_DeviceConfig_Role_REPEATER) {
         router = new FloodingRouter();
+#if defined(USE_E7MR) 
+        //router_1 = new FloodingRouter();
+        //router_2 = new FloodingRouter();
+#endif
+
 #ifdef PIN_3V3_EN
         digitalWrite(PIN_3V3_EN, LOW);
 #endif
     } else
         router = new ReliableRouter();
+#if defined(USE_E7MR) 
+        //router_1 = new ReliableRouter();
+        //router_2 = new ReliableRouter();
+#endif        
+        
 
 #if HAS_BUTTON || defined(ARCH_PORTDUINO)
     // Buttons. Moved here cause we need NodeDB to be initialized
@@ -714,9 +736,10 @@ void setup()
     SPI.begin();
 #else
     // ESP32
-    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-    LOG_DEBUG("SPI.begin(SCK=%d, MISO=%d, MOSI=%d, NSS=%d)", LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-    SPI.setFrequency(4000000);
+    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS); //RADIO-Related
+    LOG_DEBUG("SPI.begin(SCK=%d, MISO=%d, MOSI=%d, NSS=%d)", LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);          //RADIO-Related
+    SPI.setFrequency(4000000);                          //RADIO-Related
+
 #endif
 
     // Initialize the screen first so we can show the logo while we start up everything else.
@@ -969,6 +992,80 @@ void setup()
     }
 #endif
 
+#if defined(USE_E7MR)               //RADIO-Related
+    /*
+    pinMode(SX126X_CS, OUTPUT);
+    pinMode(SX126X_1_CS, OUTPUT);
+    pinMode(SX126X_2_CS, OUTPUT);
+    digitalWrite(SX126X_CS, HIGH);
+    digitalWrite(SX126X_1_CS, HIGH);
+    digitalWrite(SX126X_2_CS, HIGH);
+
+    
+    E7MRLockingArduinoHal *RadioLibHAL_0 = new E7MRLockingArduinoHal(SPI, spiSettings);   
+    E7MRLockingArduinoHal *RadioLibHAL_1 = new E7MRLockingArduinoHal(SPI, spiSettings);
+    E7MRLockingArduinoHal *RadioLibHAL_2 = new E7MRLockingArduinoHal(SPI, spiSettings);
+
+    if (!rIf_2) {
+        rIf_2 = new E7MRInterface(RadioLibHAL_2, "Radio 2", SX126X_2_CS, SX126X_2_DIO1, SX126X_2_RESET, SX126X_2_BUSY);
+        
+        if (!rIf_2->init()) {
+            LOG_WARN("No e7MR 2");
+            delete rIf_2;
+            rIf_2 = NULL;
+        } else {
+            LOG_INFO("e7MR 2 init success");
+        }
+        
+    }
+    
+    if (!rIf_1) {
+        rIf_1 = new E7MRInterface(RadioLibHAL_1, "Radio 1", SX126X_1_CS, SX126X_1_DIO1, SX126X_1_RESET, SX126X_1_BUSY);
+        
+        if (!rIf_1->init()) {
+            LOG_WARN("No e7MR 1");
+            delete rIf_1;
+            rIf_1 = NULL;
+        } else {
+            LOG_INFO("e7MR 1 init success");
+        }
+        
+    }
+    
+    if (!rIf) {
+        
+        rIf = new E7MRInterface(RadioLibHAL_0, "Radio 0", SX126X_CS, SX126X_DIO1, SX126X_RESET, SX126X_BUSY);
+
+        if (!rIf->init()) {
+            LOG_WARN("No e7MR");
+            delete rIf;
+            rIf = NULL;
+        } else {
+            LOG_INFO("e7MR init success");
+            
+        }
+    }
+    */ 
+    if (!rIf) {
+        
+        rIf = new E7MRWrapper();
+
+        if (!rIf->init()) {
+            LOG_WARN("No e7MR");
+            delete rIf;
+            rIf = NULL;
+        } else {
+            LOG_INFO("e7MR init success");
+            
+        }
+    }
+
+    //rIf = new E7MRWrapper();
+    
+    radioType = E7MR_RADIO;
+    
+#endif
+
 #if defined(USE_SX1262) && !defined(ARCH_PORTDUINO) && !defined(TCXO_OPTIONAL) && RADIOLIB_EXCLUDE_SX126X != 1
     if ((!rIf) && (config.lora.region != meshtastic_Config_LoRaConfig_RegionCode_LORA_24)) {
         rIf = new SX1262Interface(RadioLibHAL, SX126X_CS, SX126X_DIO1, SX126X_RESET, SX126X_BUSY);
@@ -1098,7 +1195,7 @@ void setup()
 #endif
 
     // check if the radio chip matches the selected region
-    if ((config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_LORA_24) && (!rIf->wideLora())) {
+    if ((config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_LORA_24) && (!rIf->wideLora())) {        //RADIO-Related
         LOG_WARN("LoRa chip does not support 2.4GHz. Revert to unset");
         config.lora.region = meshtastic_Config_LoRaConfig_RegionCode_UNSET;
         nodeDB->saveToDisk(SEGMENT_CONFIG);
@@ -1108,6 +1205,31 @@ void setup()
             rebootAtMsec = millis() + 5000;
         }
     }
+/*
+#if defined(USE_E7MR) 
+    if ((config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_LORA_24) && (!rIf_1->wideLora())) {        //RADIO-Related
+        LOG_WARN("LoRa chip does not support 2.4GHz. Revert to unset");
+        config.lora.region = meshtastic_Config_LoRaConfig_RegionCode_UNSET;
+        nodeDB->saveToDisk(SEGMENT_CONFIG);
+        if (!rIf_1->reconfigure()) {
+            LOG_WARN("Reconfigure failed, rebooting");
+            screen->startAlert("Rebooting...");
+            rebootAtMsec = millis() + 5000;
+        }
+    }
+
+    if ((config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_LORA_24) && (!rIf_2->wideLora())) {        //RADIO-Related
+        LOG_WARN("LoRa chip does not support 2.4GHz. Revert to unset");
+        config.lora.region = meshtastic_Config_LoRaConfig_RegionCode_UNSET;
+        nodeDB->saveToDisk(SEGMENT_CONFIG);
+        if (!rIf_2->reconfigure()) {
+            LOG_WARN("Reconfigure failed, rebooting");
+            screen->startAlert("Rebooting...");
+            rebootAtMsec = millis() + 5000;
+        }
+    }
+#endif
+*/
 
     lateInitVariant(); // Do board specific init (see extra_variants/README.md for documentation)
 
@@ -1150,18 +1272,45 @@ void setup()
 #endif
 
     // Start airtime logger thread.
-    airTime = new AirTime();
+    airTime = new AirTime();        //RADIO-Related
 
-    if (!rIf)
-        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_NO_RADIO);
+    if (!rIf)                       //RADIO-Related
+        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_NO_RADIO);    //RADIO-Related
     else {
-        router->addInterface(rIf);
+        router->addInterface(rIf);                                      //RADIO-Related
 
         // Log bit rate to debug output
         LOG_DEBUG("LoRA bitrate = %f bytes / sec", (float(meshtastic_Constants_DATA_PAYLOAD_LEN) /
                                                     (float(rIf->getPacketTime(meshtastic_Constants_DATA_PAYLOAD_LEN)))) *
-                                                       1000);
+                                                       1000);           //RADIO-Related
     }
+/*
+#if defined(USE_E7MR) 
+   
+    if (!rIf_1)                       //RADIO-Related
+        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_NO_RADIO);    //RADIO-Related
+    else {
+        router_1->addInterface(rIf_1);                                      //RADIO-Related
+
+        // Log bit rate to debug output
+        LOG_DEBUG("LoRA 01 bitrate = %f bytes / sec", (float(meshtastic_Constants_DATA_PAYLOAD_LEN) /
+                                                    (float(rIf_1->getPacketTime(meshtastic_Constants_DATA_PAYLOAD_LEN)))) *
+                                                       1000);           //RADIO-Related
+    }
+
+    if (!rIf_2)                       //RADIO-Related
+        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_NO_RADIO);    //RADIO-Related
+    else {
+        router_2->addInterface(rIf_2);                                      //RADIO-Related
+
+        // Log bit rate to debug output
+        LOG_DEBUG("LoRA 02 bitrate = %f bytes / sec", (float(meshtastic_Constants_DATA_PAYLOAD_LEN) /
+                                                    (float(rIf_2->getPacketTime(meshtastic_Constants_DATA_PAYLOAD_LEN)))) *
+                                                       1000);           //RADIO-Related
+    }
+  
+#endif
+*/
 
     // This must be _after_ service.init because we need our preferences loaded from flash to have proper timeout values
     PowerFSM_setup(); // we will transition to ON in a couple of seconds, FIXME, only do this for cold boots, not waking from SDS
@@ -1253,6 +1402,18 @@ void loop()
         meshtastic::printThreadInfo("main");
     }
 #endif
+
+    
+
+  
+    if(digitalRead(SX126X_1_DIO1) == HIGH){
+        rIf->triggerRx(1);
+        //LOG_INFO("R-1 main loop");
+    }
+    if(digitalRead(SX126X_2_DIO1) == HIGH){
+        //LOG_INFO("R-2 main loop");
+        rIf->triggerRx(2);
+    }
 
     service->loop();
 

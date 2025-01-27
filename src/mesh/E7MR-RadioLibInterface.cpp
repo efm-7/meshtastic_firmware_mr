@@ -1,4 +1,4 @@
-#include "RadioLibInterface.h"
+#include "E7MR-RadioLibInterface.h"
 #include "MeshTypes.h"
 #include "NodeDB.h"
 #include "PowerMon.h"
@@ -11,63 +11,26 @@
 #include <pb_decode.h>
 #include <pb_encode.h>
 
-#if ARCH_PORTDUINO
-#include "PortduinoGlue.h"
-#include "meshUtils.h"
-#endif
-void LockingArduinoHal::spiBeginTransaction()
+void E7MRLockingArduinoHal::spiBeginTransaction()
 {
     spiLock->lock();
 
     ArduinoHal::spiBeginTransaction();
 }
 
-void LockingArduinoHal::spiEndTransaction()
+void E7MRLockingArduinoHal::spiEndTransaction()
 {
     ArduinoHal::spiEndTransaction();
 
     spiLock->unlock();
 }
-#if ARCH_PORTDUINO
-void LockingArduinoHal::spiTransfer(uint8_t *out, size_t len, uint8_t *in)
-{
-    if (busy == RADIOLIB_NC) {
-        spi->transfer(out, in, len);
-    } else {
-        uint16_t offset = 0;
 
-        while (len) {
-            uint8_t block_size = (len < 20 ? len : 20);
-            spi->transfer((out != NULL ? out + offset : NULL), (in != NULL ? in + offset : NULL), block_size);
-            if (block_size == len)
-                return;
 
-            // ensure GPIO is low
-
-            uint32_t start = millis();
-            while (digitalRead(busy)) {
-                if (!Throttle::isWithinTimespanMs(start, 2000)) {
-                    LOG_ERROR("GPIO mid-transfer timeout, is it connected?");
-                    return;
-                }
-            }
-
-            offset += block_size;
-            len -= block_size;
-        }
-    }
-}
-#endif
-
-RadioLibInterface::RadioLibInterface(LockingArduinoHal *hal, RADIOLIB_PIN_TYPE cs, RADIOLIB_PIN_TYPE irq, RADIOLIB_PIN_TYPE rst,
+E7MRadioLibInterface::E7MRadioLibInterface(E7MRLockingArduinoHal *hal, String _moduleName, RADIOLIB_PIN_TYPE cs, RADIOLIB_PIN_TYPE irq, RADIOLIB_PIN_TYPE rst,
                                      RADIOLIB_PIN_TYPE busy, PhysicalLayer *_iface)
-    : NotifiedWorkerThread("RadioIf"), module(hal, cs, irq, rst, busy), iface(_iface)
+    : NotifiedWorkerThread(_moduleName.c_str()), module(hal, cs, irq, rst, busy), iface(_iface), moduleName(_moduleName)
 {
     instance = this;
-#if defined(ARCH_STM32WL) && defined(USE_SX1262)
-    module.setCb_digitalWrite(stm32wl_emulate_digitalWrite);
-    module.setCb_digitalRead(stm32wl_emulate_digitalRead);
-#endif
 }
 
 #ifdef ARCH_ESP32
@@ -77,36 +40,40 @@ RadioLibInterface::RadioLibInterface(LockingArduinoHal *hal, RADIOLIB_PIN_TYPE c
 #define YIELD_FROM_ISR(x) portYIELD_FROM_ISR(x)
 #endif
 
-void INTERRUPT_ATTR RadioLibInterface::isrLevel0Common(PendingISR cause)
+void INTERRUPT_ATTR E7MRadioLibInterface::isrLevel0Common(PendingISR cause)
 {
     instance->disableInterrupt();
-
+    //disableInterrupt();
+    //LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - isrLevel0Common called", instance->moduleName); //cause crashes??? YES
     BaseType_t xHigherPriorityTaskWoken;
     instance->notifyFromISR(&xHigherPriorityTaskWoken, cause, true);
+    //notifyFromISR(&xHigherPriorityTaskWoken, cause, true);
 
     /* Force a context switch if xHigherPriorityTaskWoken is now set to pdTRUE.
     The macro used to do this is dependent on the port and may be called
     portEND_SWITCHING_ISR. */
     YIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    
 }
 
-void INTERRUPT_ATTR RadioLibInterface::isrRxLevel0()
+void INTERRUPT_ATTR E7MRadioLibInterface::isrRxLevel0()
 {
+    //LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - isrRxLevel0 called ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !", instance->moduleName); //cause crashes??? YES
     isrLevel0Common(ISR_RX);
+    //LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - isrRxLevel0 called ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !", instance->moduleName); //cause crashes??? YES
 }
 
-void INTERRUPT_ATTR RadioLibInterface::isrTxLevel0()
+void INTERRUPT_ATTR E7MRadioLibInterface::isrTxLevel0()
 {
     isrLevel0Common(ISR_TX);
 }
 
-
 /** Our ISR code currently needs this to find our active instance
  */
-RadioLibInterface *RadioLibInterface::instance;
+E7MRadioLibInterface *E7MRadioLibInterface::instance;
 
 /** Could we send right now (i.e. either not actively receiving or transmitting)? */
-bool RadioLibInterface::canSendImmediately()
+bool E7MRadioLibInterface::canSendImmediately()
 {
     // We wait _if_ we are partially though receiving a packet (rather than just merely waiting for one).
     // To do otherwise would be doubly bad because not only would we drop the packet that was on the way in,
@@ -116,26 +83,29 @@ bool RadioLibInterface::canSendImmediately()
 
     if (busyTx || busyRx) {
         if (busyTx) {
-            LOG_WARN("Can not send yet, busyTx");
+            LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Can not send yet, busyTx", moduleName);
         }
         // If we've been trying to send the same packet more than one minute and we haven't gotten a
         // TX IRQ from the radio, the radio is probably broken.
         if (busyTx && !Throttle::isWithinTimespanMs(lastTxStart, 60000)) {
-            LOG_ERROR("Hardware Failure! busyTx for more than 60s");
+            LOG_ERROR("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Hardware Failure! busyTx for more than 60s", moduleName);
             RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_TRANSMIT_FAILED);
             // reboot in 5 seconds when this condition occurs.
             rebootAtMsec = lastTxStart + 65000;
         }
         if (busyRx) {
-            LOG_WARN("Can not send yet, busyRx");
+            LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Can not send yet, busyRx", moduleName);
         }
         return false;
     } else
         return true;
 }
 
-bool RadioLibInterface::receiveDetected(uint16_t irq, ulong syncWordHeaderValidFlag, ulong preambleDetectedFlag)
+bool E7MRadioLibInterface::receiveDetected(uint16_t irq, ulong syncWordHeaderValidFlag, ulong preambleDetectedFlag)
 {
+    //LOG_DEBUG("%s [E7MRadioLibInterface] :::::::::::: E7MR-RLI - receiveDetected() called ", moduleName); //cause crashes??? YES
+    LOG_DEBUG("%s [E7MRadioLibInterface] :::::::::::: E7MR-RLI - receiveDetected() called ", moduleName);
+    
     bool detected = (irq & (syncWordHeaderValidFlag | preambleDetectedFlag));
     // Handle false detections
     if (detected) {
@@ -144,14 +114,15 @@ bool RadioLibInterface::receiveDetected(uint16_t irq, ulong syncWordHeaderValidF
         } else if (!Throttle::isWithinTimespanMs(activeReceiveStart, 2 * preambleTimeMsec) && !(irq & syncWordHeaderValidFlag)) {
             // The HEADER_VALID flag should be set by now if it was really a packet, so ignore PREAMBLE_DETECTED flag
             activeReceiveStart = 0;
-            LOG_DEBUG("Ignore false preamble detection");
+            //LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Ignore false preamble detection", moduleName);
             return false;
         } else if (!Throttle::isWithinTimespanMs(activeReceiveStart, maxPacketTimeMsec)) {
             // We should have gotten an RX_DONE IRQ by now if it was really a packet, so ignore HEADER_VALID flag
             activeReceiveStart = 0;
-            LOG_DEBUG("Ignore false header detection");
+            //LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Ignore false header detection", moduleName);
             return false;
         }
+        //LOG_DEBUG("%s [E7MRadioLibInterface] :::::::::::: E7MR-RLI - receiveDetected() detected ", moduleName); //cause crashes??? YES
     }
     return detected;
 }
@@ -159,28 +130,28 @@ bool RadioLibInterface::receiveDetected(uint16_t irq, ulong syncWordHeaderValidF
 /// Send a packet (possibly by enquing in a private fifo).  This routine will
 /// later free() the packet to pool.  This routine is not allowed to stall because it is called from
 /// bluetooth comms code.  If the txmit queue is empty it might return an error
-ErrorCode RadioLibInterface::send(meshtastic_MeshPacket *p)
+ErrorCode E7MRadioLibInterface::send(meshtastic_MeshPacket *p)
 {
 
 #ifndef DISABLE_WELCOME_UNSET
 
     if (config.lora.region != meshtastic_Config_LoRaConfig_RegionCode_UNSET) {
-        if (disabled || !config.lora.tx_enabled) {
-            LOG_WARN("send - !config.lora.tx_enabled");
+        if (disabled || !config.lora.tx_enabled || !enMRTx) {
+            LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - send - !config.lora.tx_enabled", moduleName);
             packetPool.release(p);
             return ERRNO_DISABLED;
         }
 
     } else {
-        LOG_WARN("send - lora tx disabled: Region unset");
+        LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - send - lora tx disabled: Region unset", moduleName);
         packetPool.release(p);
         return ERRNO_DISABLED;
     }
 
 #else
 
-    if (disabled || !config.lora.tx_enabled) {
-        LOG_WARN("send - !config.lora.tx_enabled");
+    if (disabled || !config.lora.tx_enabled || !enMRTx) {
+        LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - send - !config.lora.tx_enabled", moduleName);
         packetPool.release(p);
         return ERRNO_DISABLED;
     }
@@ -188,15 +159,16 @@ ErrorCode RadioLibInterface::send(meshtastic_MeshPacket *p)
 #endif
 
     if (p->to == NODENUM_BROADCAST_NO_LORA) {
-        LOG_DEBUG("Drop no-LoRa pkt");
+        LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Drop no-LoRa pkt", moduleName);
         return ERRNO_SHOULD_RELEASE;
     }
 
     // Sometimes when testing it is useful to be able to never turn on the xmitter
 #ifndef LORA_DISABLE_SENDING
-    printPacket("enqueue for send", p);
+    LOG_DEBUG("%s VVVV", moduleName);
+    printPacket(">>>> [E7MRadioLibInterface] ::::::::::: E7MR-RLI - enqueue for send", p);
 
-    LOG_DEBUG("txGood=%d,txRelay=%d,rxGood=%d,rxBad=%d", txGood, txRelay, rxGood, rxBad);
+    LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - txGood=%d,txRelay=%d,rxGood=%d,rxBad=%d", moduleName, txGood, txRelay, rxGood, rxBad);
     ErrorCode res = txQueue.enqueue(p) ? ERRNO_OK : ERRNO_UNKNOWN;
 
     if (res != ERRNO_OK) { // we weren't able to queue it, so we must drop it to prevent leaks
@@ -215,7 +187,7 @@ ErrorCode RadioLibInterface::send(meshtastic_MeshPacket *p)
 #endif
 }
 
-meshtastic_QueueStatus RadioLibInterface::getQueueStatus()
+meshtastic_QueueStatus E7MRadioLibInterface::getQueueStatus()
 {
     meshtastic_QueueStatus qs;
 
@@ -226,24 +198,24 @@ meshtastic_QueueStatus RadioLibInterface::getQueueStatus()
     return qs;
 }
 
-bool RadioLibInterface::canSleep()
+bool E7MRadioLibInterface::canSleep()
 {
     bool res = txQueue.empty();
     if (!res) { // only print debug messages if we are vetoing sleep
-        LOG_DEBUG("Radio wait to sleep, txEmpty=%d", res);
+        LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Radio wait to sleep, txEmpty=%d", moduleName, res);
     }
     return res;
 }
 
 /** Attempt to cancel a previously sent packet.  Returns true if a packet was found we could cancel */
-bool RadioLibInterface::cancelSending(NodeNum from, PacketId id)
+bool E7MRadioLibInterface::cancelSending(NodeNum from, PacketId id)
 {
     auto p = txQueue.remove(from, id);
     if (p)
         packetPool.release(p); // free the packet we just removed
 
     bool result = (p != NULL);
-    LOG_DEBUG("cancelSending id=0x%x, removed=%d", id, result);
+    LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - cancelSending id=0x%x, removed=%d", moduleName, id, result);
     return result;
 }
 
@@ -254,8 +226,9 @@ The CW size is determined by setTransmitDelay() and depends either on the curren
 of a flooding message. After this, we perform channel activity detection (CAD) and reset the transmit delay if it is
 currently active.
 */
-void RadioLibInterface::onNotify(uint32_t notification)
+void E7MRadioLibInterface::onNotify(uint32_t notification)
 {
+    
     switch (notification) {
     case ISR_TX:
         handleTransmitInterrupt();
@@ -297,9 +270,10 @@ void RadioLibInterface::onNotify(uint32_t notification)
     default:
         assert(0); // We expected to receive a valid notification from the ISR
     }
+    //LOG_DEBUG(":::::::::::: %s - E7MRadioLibInterface::onNotify %d ",moduleName, notification); //cause crashes???
 }
 
-void RadioLibInterface::setTransmitDelay()
+void E7MRadioLibInterface::setTransmitDelay()
 {
     meshtastic_MeshPacket *p = txQueue.getFront();
     // We want all sending/receiving to be done by our daemon thread.
@@ -314,12 +288,12 @@ void RadioLibInterface::setTransmitDelay()
         startTransmitTimer(true);
     } else {
         // If there is a SNR, start a timer scaled based on that SNR.
-        LOG_DEBUG("rx_snr found. hop_limit:%d rx_snr:%f", p->hop_limit, p->rx_snr);
+        LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - rx_snr found. hop_limit:%d rx_snr:%f", moduleName, p->hop_limit, p->rx_snr);
         startTransmitTimerSNR(p->rx_snr);
     }
 }
 
-void RadioLibInterface::startTransmitTimer(bool withDelay)
+void E7MRadioLibInterface::startTransmitTimer(bool withDelay)
 {
     // If we have work to do and the timer wasn't already scheduled, schedule it now
     if (!txQueue.empty()) {
@@ -328,7 +302,7 @@ void RadioLibInterface::startTransmitTimer(bool withDelay)
     }
 }
 
-void RadioLibInterface::startTransmitTimerSNR(float snr)
+void E7MRadioLibInterface::startTransmitTimerSNR(float snr)
 {
     // If we have work to do and the timer wasn't already scheduled, schedule it now
     if (!txQueue.empty()) {
@@ -337,7 +311,7 @@ void RadioLibInterface::startTransmitTimerSNR(float snr)
     }
 }
 
-void RadioLibInterface::handleTransmitInterrupt()
+void E7MRadioLibInterface::handleTransmitInterrupt()
 {
     // This can be null if we forced the device to enter standby mode.  In that case
     // ignore the transmit interrupt
@@ -346,7 +320,7 @@ void RadioLibInterface::handleTransmitInterrupt()
     powerMon->clearState(meshtastic_PowerMon_State_Lora_TXOn); // But our transmitter is definitely off now
 }
 
-void RadioLibInterface::completeSending()
+void E7MRadioLibInterface::completeSending()
 {
     // We are careful to clear sending packet before calling printPacket because
     // that can take a long time
@@ -357,112 +331,117 @@ void RadioLibInterface::completeSending()
         txGood++;
         if (!isFromUs(p))
             txRelay++;
-        printPacket("Completed sending", p);
+        LOG_DEBUG("%s VVVV", moduleName);    
+        printPacket(">>>> [E7MRadioLibInterface]::::::::::: E7MR-RLI - Completed sending", p);
 
         // We are done sending that packet, release it
         packetPool.release(p);
     }
 }
 
-void RadioLibInterface::handleReceiveInterrupt()
+void E7MRadioLibInterface::handleReceiveInterrupt()
 {
-    uint32_t xmitMsec;
+    if(enMRRx){
+        uint32_t xmitMsec;
+        //LOG_DEBUG("%s [E7MRadioLibInterface]:::::::::::: E7MR-RLI - handleReceiveInterrupt() called  ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !", moduleName); 
+        // when this is called, we should be in receive mode - if we are not, just jump out instead of bombing. Possible Race
+        // Condition?
+        /*
+        if (!isReceiving) {
+            LOG_ERROR("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - handleReceiveInterrupt called when not in rx mode, which shouldn't happen", moduleName);
+            return;
+        }*/
 
-    // when this is called, we should be in receive mode - if we are not, just jump out instead of bombing. Possible Race
-    // Condition?
-    if (!isReceiving) {
-        LOG_ERROR("handleReceiveInterrupt called when not in rx mode, which shouldn't happen");
-        return;
-    }
+        isReceiving = false;
 
-    isReceiving = false;
+        // read the number of actually received bytes
+        size_t length = iface->getPacketLength();
 
-    // read the number of actually received bytes
-    size_t length = iface->getPacketLength();
+        xmitMsec = getPacketTime(length);
 
-    xmitMsec = getPacketTime(length);
-
-#ifndef DISABLE_WELCOME_UNSET
-    if (config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_UNSET) {
-        LOG_WARN("lora rx disabled: Region unset");
-        airTime->logAirtime(RX_ALL_LOG, xmitMsec);
-        return;
-    }
-#endif
-
-    int state = iface->readData((uint8_t *)&radioBuffer, length);
-#if ARCH_PORTDUINO
-    if (settingsMap[logoutputlevel] == level_trace) {
-        printBytes("Raw incoming packet: ", (uint8_t *)&radioBuffer, length);
-    }
-#endif
-    if (state != RADIOLIB_ERR_NONE) {
-        LOG_ERROR("Ignore received packet due to error=%d", state);
-        rxBad++;
-
-        airTime->logAirtime(RX_ALL_LOG, xmitMsec);
-
-    } else {
-        // Skip the 4 headers that are at the beginning of the rxBuf
-        int32_t payloadLen = length - sizeof(PacketHeader);
-
-        // check for short packets
-        if (payloadLen < 0) {
-            LOG_WARN("Ignore received packet too short");
-            rxBad++;
+    #ifndef DISABLE_WELCOME_UNSET
+        if (config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_UNSET) {
+            LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - lora rx disabled: Region unset", moduleName);
             airTime->logAirtime(RX_ALL_LOG, xmitMsec);
+            return;
+        }
+    #endif
+
+        int state = iface->readData((uint8_t *)&radioBuffer, length);
+LOG_DEBUG("%s [E7MRadioLibInterface]:::::::::::: E7MR-RLI - readData() called",moduleName);
+        if (state != RADIOLIB_ERR_NONE) {
+            LOG_ERROR("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Ignore received packet due to error=%d", moduleName, state);
+            rxBad++;
+
+            airTime->logAirtime(RX_ALL_LOG, xmitMsec);
+
         } else {
-            rxGood++;
-            // altered packet with "from == 0" can do Remote Node Administration without permission
-            if (radioBuffer.header.from == 0) {
-                LOG_WARN("Ignore received packet without sender");
-                return;
+            // Skip the 4 headers that are at the beginning of the rxBuf
+            int32_t payloadLen = length - sizeof(PacketHeader);
+
+            // check for short packets
+            if (payloadLen < 0) {
+                LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Ignore received packet too short", moduleName);
+                rxBad++;
+                airTime->logAirtime(RX_ALL_LOG, xmitMsec);
+            } else {
+                rxGood++;
+                // altered packet with "from == 0" can do Remote Node Administration without permission
+                if (radioBuffer.header.from == 0) {
+                    LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Ignore received packet without sender", moduleName);
+                    return;
+                }
+
+                // Note: we deliver _all_ packets to our router (i.e. our interface is intentionally promiscuous).
+                // This allows the router and other apps on our node to sniff packets (usually routing) between other
+                // nodes.
+                meshtastic_MeshPacket *mp = packetPool.allocZeroed();
+
+                mp->from = radioBuffer.header.from;
+                mp->to = radioBuffer.header.to;
+                mp->id = radioBuffer.header.id;
+                mp->channel = radioBuffer.header.channel;
+                assert(HOP_MAX <= PACKET_FLAGS_HOP_LIMIT_MASK); // If hopmax changes, carefully check this code
+                mp->hop_limit = radioBuffer.header.flags & PACKET_FLAGS_HOP_LIMIT_MASK;
+                mp->hop_start = (radioBuffer.header.flags & PACKET_FLAGS_HOP_START_MASK) >> PACKET_FLAGS_HOP_START_SHIFT;
+                mp->want_ack = !!(radioBuffer.header.flags & PACKET_FLAGS_WANT_ACK_MASK);
+                mp->via_mqtt = !!(radioBuffer.header.flags & PACKET_FLAGS_VIA_MQTT_MASK);
+
+                addReceiveMetadata(mp);
+
+                mp->which_payload_variant =
+                    meshtastic_MeshPacket_encrypted_tag; // Mark that the payload is still encrypted at this point
+                assert(((uint32_t)payloadLen) <= sizeof(mp->encrypted.bytes));
+                memcpy(mp->encrypted.bytes, radioBuffer.payload, payloadLen);
+                mp->encrypted.size = payloadLen;
+                LOG_DEBUG("%s VVVV", moduleName);
+                printPacket(">>>> [E7MRadioLibInterface]::::::::::: E7MR-RLI - Lora RX (deliverToReceiver())", mp);
+
+                airTime->logAirtime(RX_LOG, xmitMsec);
+
+                deliverToReceiver(mp);
             }
-
-            // Note: we deliver _all_ packets to our router (i.e. our interface is intentionally promiscuous).
-            // This allows the router and other apps on our node to sniff packets (usually routing) between other
-            // nodes.
-            meshtastic_MeshPacket *mp = packetPool.allocZeroed();
-
-            mp->from = radioBuffer.header.from;
-            mp->to = radioBuffer.header.to;
-            mp->id = radioBuffer.header.id;
-            mp->channel = radioBuffer.header.channel;
-            assert(HOP_MAX <= PACKET_FLAGS_HOP_LIMIT_MASK); // If hopmax changes, carefully check this code
-            mp->hop_limit = radioBuffer.header.flags & PACKET_FLAGS_HOP_LIMIT_MASK;
-            mp->hop_start = (radioBuffer.header.flags & PACKET_FLAGS_HOP_START_MASK) >> PACKET_FLAGS_HOP_START_SHIFT;
-            mp->want_ack = !!(radioBuffer.header.flags & PACKET_FLAGS_WANT_ACK_MASK);
-            mp->via_mqtt = !!(radioBuffer.header.flags & PACKET_FLAGS_VIA_MQTT_MASK);
-
-            addReceiveMetadata(mp);
-
-            mp->which_payload_variant =
-                meshtastic_MeshPacket_encrypted_tag; // Mark that the payload is still encrypted at this point
-            assert(((uint32_t)payloadLen) <= sizeof(mp->encrypted.bytes));
-            memcpy(mp->encrypted.bytes, radioBuffer.payload, payloadLen);
-            mp->encrypted.size = payloadLen;
-
-            printPacket("Lora RX", mp);
-
-            airTime->logAirtime(RX_LOG, xmitMsec);
-
-            deliverToReceiver(mp);
         }
     }
 }
 
-void RadioLibInterface::startReceive()
+void E7MRadioLibInterface::startReceive()
 {
-    isReceiving = true;
-    powerMon->setState(meshtastic_PowerMon_State_Lora_RXOn);
+    if(enMRRx){
+        isReceiving = true;
+        powerMon->setState(meshtastic_PowerMon_State_Lora_RXOn);
+    }else{
+        LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7M-RLI startReceive() - RX DISABLED ", moduleName);
+    }
+    //LOG_DEBUG("%s [E7MRadioLibInterface] ::::::::::: E7M-RLI - startReceive called %s  ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! ! !", moduleName);//cause crashes??? currentlytesting
 }
 
-void RadioLibInterface::configHardwareForSend()
+void E7MRadioLibInterface::configHardwareForSend()
 {
     powerMon->setState(meshtastic_PowerMon_State_Lora_TXOn);
 }
 
-void RadioLibInterface::setStandby()
+void E7MRadioLibInterface::setStandby()
 {
     // neither sending nor receiving
     powerMon->clearState(meshtastic_PowerMon_State_Lora_RXOn);
@@ -470,12 +449,12 @@ void RadioLibInterface::setStandby()
 }
 
 /** start an immediate transmit */
-bool RadioLibInterface::startSend(meshtastic_MeshPacket *txp)
+bool E7MRadioLibInterface::startSend(meshtastic_MeshPacket *txp)
 {
     /* NOTE: Minimize the actions before startTransmit() to keep the time between
              channel scan and actual transmit as low as possible to avoid collisions. */
-    if (disabled || !config.lora.tx_enabled) {
-        LOG_WARN("Drop Tx packet because LoRa Tx disabled");
+    if (disabled || !config.lora.tx_enabled || !enMRTx) {
+        LOG_WARN("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Drop Tx packet because LoRa Tx disabled", moduleName);
         packetPool.release(txp);
         return false;
     } else {
@@ -485,7 +464,7 @@ bool RadioLibInterface::startSend(meshtastic_MeshPacket *txp)
 
         int res = iface->startTransmit((uint8_t *)&radioBuffer, numbytes);
         if (res != RADIOLIB_ERR_NONE) {
-            LOG_ERROR("startTransmit failed, error=%d", res);
+            LOG_ERROR("%s [E7MRadioLibInterface] ::::::::::: E7MR-RLI - startTransmit failed, error=%d", moduleName, res);
             RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_RADIO_SPI_BUG);
 
             // This send failed, but make sure to 'complete' it properly
@@ -494,7 +473,8 @@ bool RadioLibInterface::startSend(meshtastic_MeshPacket *txp)
             startReceive(); // Restart receive mode (because startTransmit failed to put us in xmit mode)
         } else {
             lastTxStart = millis();
-            printPacket("Started Tx", txp);
+            LOG_DEBUG("%s VVVV", moduleName);
+            printPacket(">>>> [E7MRadioLibInterface] ::::::::::: E7MR-RLI - Started Tx", txp);
         }
 
         // Must be done AFTER, starting transmit, because startTransmit clears (possibly stale) interrupt pending register
@@ -503,4 +483,17 @@ bool RadioLibInterface::startSend(meshtastic_MeshPacket *txp)
 
         return res == RADIOLIB_ERR_NONE;
     }
+}
+
+void E7MRadioLibInterface::enableRx(){
+    enMRRx = true;
+}
+void E7MRadioLibInterface::disableRx(){
+    enMRRx = false;
+}
+void E7MRadioLibInterface::enableTx(){
+    enMRTx = true;
+}
+void E7MRadioLibInterface::disableTx(){
+    enMRTx = false;
 }

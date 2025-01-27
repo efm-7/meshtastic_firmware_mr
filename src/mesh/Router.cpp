@@ -1,12 +1,12 @@
 #include "Router.h"
 #include "Channels.h"
 #include "CryptoEngine.h"
-#include "MeshRadio.h"
+#include "MeshRadio.h"                      //RADIO-Related
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "RTC.h"
 #include "configuration.h"
-#include "detect/LoRaRadioType.h"
+#include "detect/LoRaRadioType.h"           //RADIO-Related
 #include "main.h"
 #include "mesh-pb-constants.h"
 #include "meshUtils.h"
@@ -107,14 +107,14 @@ PacketId generatePacketId()
         // pick a random initial sequence number at boot (to prevent repeated reboots always starting at 0)
         // Note: we mask the high order bit to ensure that we never pass a 'negative' number to random
         rollingPacketId = random(UINT32_MAX & 0x7fffffff);
-        LOG_DEBUG("Initial packet id %u", rollingPacketId);
+        //LOG_DEBUG("Initial packet id %u", rollingPacketId);
     }
 
     rollingPacketId++;
 
     rollingPacketId &= ID_COUNTER_MASK;                                    // Mask out the top 22 bits
     PacketId id = rollingPacketId | random(UINT32_MAX & 0x7fffffff) << 10; // top 22 bits
-    LOG_DEBUG("Partially randomized packet id %u", id);
+    //LOG_DEBUG("Partially randomized packet id %u", id);
     return id;
 }
 
@@ -313,7 +313,7 @@ bool perhapsDecode(meshtastic_MeshPacket *p)
 
     if (config.device.rebroadcast_mode == meshtastic_Config_DeviceConfig_RebroadcastMode_KNOWN_ONLY &&
         (nodeDB->getMeshNode(p->from) == NULL || !nodeDB->getMeshNode(p->from)->has_user)) {
-        LOG_DEBUG("Node 0x%x not in nodeDB-> Rebroadcast mode KNOWN_ONLY will ignore packet", p->from);
+        //LOG_DEBUG("Node 0x%x not in nodeDB-> Rebroadcast mode KNOWN_ONLY will ignore packet", p->from);
         return false;
     }
 
@@ -335,7 +335,7 @@ bool perhapsDecode(meshtastic_MeshPacket *p)
     if (p->channel == 0 && isToUs(p) && p->to > 0 && !isBroadcast(p->to) && nodeDB->getMeshNode(p->from) != nullptr &&
         nodeDB->getMeshNode(p->from)->user.public_key.size > 0 && nodeDB->getMeshNode(p->to)->user.public_key.size > 0 &&
         rawSize > MESHTASTIC_PKC_OVERHEAD) {
-        LOG_DEBUG("Attempt PKI decryption");
+        //LOG_DEBUG("Attempt PKI decryption");
 
         if (crypto->decryptCurve25519(p->from, nodeDB->getMeshNode(p->from)->user.public_key, p->id, rawSize, ScratchEncrypted,
                                       bytes)) {
@@ -506,7 +506,7 @@ meshtastic_Routing_Error perhapsEncode(meshtastic_MeshPacket *p)
             // Some portnums either make no sense to send with PKC
             p->decoded.portnum != meshtastic_PortNum_TRACEROUTE_APP && p->decoded.portnum != meshtastic_PortNum_NODEINFO_APP &&
             p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && p->decoded.portnum != meshtastic_PortNum_POSITION_APP) {
-            LOG_DEBUG("Use PKI!");
+            //LOG_DEBUG("Use PKI!");
             if (numbytes + MESHTASTIC_HEADER_LENGTH + MESHTASTIC_PKC_OVERHEAD > MAX_LORA_PAYLOAD_LEN)
                 return meshtastic_Routing_Error_TOO_LARGE;
             if (p->pki_encrypted && !memfll(p->public_key.bytes, 0, 32) &&
@@ -593,7 +593,7 @@ void Router::handleReceived(meshtastic_MeshPacket *p, RxSource src)
         if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
             p->decoded.portnum == meshtastic_PortNum_NEIGHBORINFO_APP &&
             (!moduleConfig.has_neighbor_info || !moduleConfig.neighbor_info.enabled)) {
-            LOG_DEBUG("Neighbor info module is disabled, ignore neighbor packet");
+            //LOG_DEBUG("Neighbor info module is disabled, ignore neighbor packet");
             cancelSending(p->from, p->id);
             skipHandle = true;
         }
@@ -608,7 +608,7 @@ void Router::handleReceived(meshtastic_MeshPacket *p, RxSource src)
                       meshtastic_PortNum_PAXCOUNTER_APP, meshtastic_PortNum_IP_TUNNEL_APP, meshtastic_PortNum_AUDIO_APP,
                       meshtastic_PortNum_PRIVATE_APP, meshtastic_PortNum_DETECTION_SENSOR_APP, meshtastic_PortNum_RANGE_TEST_APP,
                       meshtastic_PortNum_REMOTE_HARDWARE_APP)) {
-            LOG_DEBUG("Ignore packet on blacklisted portnum for CORE_PORTNUMS_ONLY");
+            //LOG_DEBUG("Ignore packet on blacklisted portnum for CORE_PORTNUMS_ONLY");
             cancelSending(p->from, p->id);
             skipHandle = true;
         }
@@ -649,32 +649,32 @@ void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
 #endif
     // assert(radioConfig.has_preferences);
     if (is_in_repeated(config.lora.ignore_incoming, p->from)) {
-        LOG_DEBUG("Ignore msg, 0x%x is in our ignore list", p->from);
+        //LOG_DEBUG("Ignore msg, 0x%x is in our ignore list", p->from);
         packetPool.release(p);
         return;
     }
 
     meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(p->from);
     if (node != NULL && node->is_ignored) {
-        LOG_DEBUG("Ignore msg, 0x%x is ignored", p->from);
+        //LOG_DEBUG("Ignore msg, 0x%x is ignored", p->from);
         packetPool.release(p);
         return;
     }
 
     if (p->from == NODENUM_BROADCAST) {
-        LOG_DEBUG("Ignore msg from broadcast address");
+        //LOG_DEBUG("Ignore msg from broadcast address");
         packetPool.release(p);
         return;
     }
 
     if (config.lora.ignore_mqtt && p->via_mqtt) {
-        LOG_DEBUG("Msg came in via MQTT from 0x%x", p->from);
+        //LOG_DEBUG("Msg came in via MQTT from 0x%x", p->from);
         packetPool.release(p);
         return;
     }
 
     if (shouldFilterReceived(p)) {
-        LOG_DEBUG("Incoming msg was filtered from 0x%x", p->from);
+        //LOG_DEBUG("Incoming msg was filtered from 0x%x", p->from);
         packetPool.release(p);
         return;
     }

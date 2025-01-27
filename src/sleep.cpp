@@ -276,6 +276,14 @@ void doDeepSleep(uint32_t msecToWake, bool skipPreflight = false, bool skipSaveN
         pinMode(LORA_CS, OUTPUT);
         digitalWrite(LORA_CS, HIGH);
         gpio_hold_en((gpio_num_t)LORA_CS);
+        
+            pinMode(SX126X_1_CS, OUTPUT);
+            digitalWrite(SX126X_1_CS, HIGH);
+            gpio_hold_en((gpio_num_t)SX126X_1_CS);
+            pinMode(SX126X_2_CS, OUTPUT);
+            digitalWrite(SX126X_2_CS, HIGH);
+            gpio_hold_en((gpio_num_t)SX126X_2_CS);
+        
     }
 #endif
 
@@ -334,7 +342,7 @@ void doDeepSleep(uint32_t msecToWake, bool skipPreflight = false, bool skipSaveN
  */
 esp_sleep_wakeup_cause_t doLightSleep(uint64_t sleepMsec) // FIXME, use a more reasonable default
 {
-    // LOG_DEBUG("Enter light sleep");
+    LOG_DEBUG("doLightSleep() called");
 
     // LORA_DIO1 is an extended IO pin. Setting it as a wake-up pin will cause problems, such as the indicator device not entering
     // LightSleep.
@@ -459,6 +467,7 @@ esp_sleep_wakeup_cause_t doLightSleep(uint64_t sleepMsec) // FIXME, use a more r
  */
 void enableModemSleep()
 {
+    LOG_DEBUG("enableModemSleep() called");
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     static esp_pm_config_t esp32_config; // filled with zeros because bss
 #else
@@ -483,30 +492,61 @@ void enableModemSleep()
 
 bool shouldLoraWake(uint32_t msecToWake)
 {
+    LOG_DEBUG("shouldLoraWake() called");
     return msecToWake < portMAX_DELAY && (config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER ||
                                           config.device.role == meshtastic_Config_DeviceConfig_Role_REPEATER);
 }
 
 void enableLoraInterrupt()
 {
+    LOG_DEBUG("enableLoraInterrupt() called");
 #if SOC_PM_SUPPORT_EXT_WAKEUP && defined(LORA_DIO1) && (LORA_DIO1 != RADIOLIB_NC)
     gpio_pulldown_en((gpio_num_t)LORA_DIO1);
+    
+        gpio_pulldown_en((gpio_num_t)LORA_1_DIO1);
+        gpio_pulldown_en((gpio_num_t)LORA_2_DIO1);
+    
 #if defined(LORA_RESET) && (LORA_RESET != RADIOLIB_NC)
     gpio_pullup_en((gpio_num_t)LORA_RESET);
+    
+        gpio_pulldown_en((gpio_num_t)LORA_1_RESET);
+        gpio_pulldown_en((gpio_num_t)LORA_2_RESET);
+    
 #endif
 #if defined(LORA_CS) && (LORA_CS != RADIOLIB_NC)
     gpio_pullup_en((gpio_num_t)LORA_CS);
+    
+        gpio_pulldown_en((gpio_num_t)LORA_1_CS);
+        gpio_pulldown_en((gpio_num_t)LORA_2_CS);
+    
 #endif
 
     if (rtc_gpio_is_valid_gpio((gpio_num_t)LORA_DIO1)) {
         // Setup light/deep sleep with wakeup by external source
-        LOG_INFO("setup LORA_DIO1 (GPIO%02d) with wakeup by external source", LORA_DIO1);
+        LOG_DEBUG("setup LORA_DIO1 (GPIO%02d) with wakeup by external source", LORA_DIO1);
         esp_sleep_enable_ext0_wakeup((gpio_num_t)LORA_DIO1, HIGH);
     } else {
-        LOG_INFO("setup LORA_DIO1 (GPIO%02d) with wakeup by gpio interrupt", LORA_DIO1);
+        LOG_DEBUG("setup LORA_DIO1 (GPIO%02d) with wakeup by gpio interrupt", LORA_DIO1);
         gpio_wakeup_enable((gpio_num_t)LORA_DIO1, GPIO_INTR_HIGH_LEVEL);
     }
-
+    
+        if (rtc_gpio_is_valid_gpio((gpio_num_t)LORA_1_DIO1)) {
+        // Setup light/deep sleep with wakeup by external source
+        LOG_DEBUG("setup LORA_1_DIO1 (GPIO%02d) with wakeup by external source", LORA_1_DIO1);
+        esp_sleep_enable_ext0_wakeup((gpio_num_t)LORA_1_DIO1, HIGH);
+        } else {
+            LOG_DEBUG("setup LORA_1_DIO1 (GPIO%02d) with wakeup by gpio interrupt", LORA_1_DIO1);
+            gpio_wakeup_enable((gpio_num_t)LORA_1_DIO1, GPIO_INTR_HIGH_LEVEL);
+        }
+        if (rtc_gpio_is_valid_gpio((gpio_num_t)LORA_2_DIO1)) {
+        // Setup light/deep sleep with wakeup by external source
+        LOG_DEBUG("setup LORA_2_DIO1 (GPIO%02d) with wakeup by external source", LORA_2_DIO1);
+        esp_sleep_enable_ext0_wakeup((gpio_num_t)LORA_2_DIO1, HIGH);
+        } else {
+            LOG_DEBUG("setup LORA_2_DIO1 (GPIO%02d) with wakeup by gpio interrupt", LORA_2_DIO1);
+            gpio_wakeup_enable((gpio_num_t)LORA_2_DIO1, GPIO_INTR_HIGH_LEVEL);
+        }
+    
 #elif defined(LORA_DIO1) && (LORA_DIO1 != RADIOLIB_NC)
     if (radioType != RF95_RADIO) {
         LOG_INFO("setup LORA_DIO1 (GPIO%02d) with wakeup by gpio interrupt", LORA_DIO1);
